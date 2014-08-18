@@ -27,6 +27,16 @@ class PShell():
 	jobCount = 1
 	def r_loop(self):
 		while True:
+			print(len(self.jobsList))
+			if(len(self.jobsList)>0):
+				for check in self.jobsList:
+					done = os.waitpid(check.pid,os.WNOHANG)
+
+					if(done[0] > 0):
+						prompt = "<Done>	%s" % (check.command)
+						print(prompt)
+						self.jobsList.pop(self.jobsList.index(check))
+
 			#Get the new input from either the terminal or the history list
 			if(len(self.historyCommand)==0):
 				prompt = "[%s@%s %s]>> " % \
@@ -44,7 +54,8 @@ class PShell():
 				self.historyList.pop()
 
 			words = self.word_list(line)
-			command = words[0]
+			if(len(words)>0):
+				command = words[0]
 
 			if(len(self.historyList)<10):
 				self.historyList.append(line)
@@ -54,59 +65,66 @@ class PShell():
 
 			if ("&" in words):
 				amper = True
+				words.pop()
 			else:
 				amper = False
 
-			try:
-				child = os.fork()
-				if child == 0: # we are in the child
-					if ("|" in words):
-						if( not self.syntax_check(words)):
-							print("That syntax isn't valid for the pipe!")
-						else:
-							while ("|" in words):
-								r, w = os.pipe()
-								index_of_pipe = words.index("|")
-
-								if (os.fork() == 0):
-									os.dup2(w, 1)
-									os.close(r)
-									os.execvp(command, words[0:index_of_pipe])
-
-								words = words[index_of_pipe+1:]
-								
-								if ("|" in words): 
+			if(len(words)>0):
+				try:
+					child = os.fork()
+					if child == 0: # we are in the child
+						if ("|" in words):
+							if( not self.syntax_check(words)):
+								print("That syntax isn't valid for the pipe!")
+							else:
+								while ("|" in words):
+									r, w = os.pipe()
 									index_of_pipe = words.index("|")
-								else: 
-									index_of_pipe = len(words)
-								
-								os.dup2(r, 0)
-								os.close(w)
 
-							command = words[0]
-							os.execvp(command, words[0:index_of_pipe])
-					elif(command == "cd"):
-						self.cd(words)
-					elif(command == "pwd"):
-						self.pwd()
-					elif((command == "history") or (command == "h")):
-						self.history(words)
-					elif(command == "jobs"):
-						self.jobs(words)
-					else:
-						os.execvp(command, words)
-				else:
-					if(not amper):
-						os.waitpid(child, 0)
-					else:
-						os.waitpid(child,os.WNOHANG)
-						child_job = job(child, self.jobCount, line)
-						self.jobsList.append(child_job)
-						print( "[%s]	%s " % (self.jobCount,child))
-						self.jobCount += 1
+									if (os.fork() == 0):
+										os.dup2(w, 1)
+										os.close(r)
+										os.execvp(command, words[0:index_of_pipe])
 
-			except OSError:
-				print('Caught an OSError.')
+									words = words[index_of_pipe+1:]
+									
+									if ("|" in words): 
+										index_of_pipe = words.index("|")
+									else: 
+										index_of_pipe = len(words)
+									
+									os.dup2(r, 0)
+									os.close(w)
+
+								command = words[0]
+								os.execvp(command, words[0:index_of_pipe])
+						elif(command == "cd"):
+							self.cd(words)
+						elif(command == "pwd"):
+							self.pwd()
+						elif((command == "history") or (command == "h")):
+							self.history(words)
+						elif(command == "jobs"):
+							self.jobs(words)
+						else:
+							os.execvp(command, words)
+					else:
+						if(not amper):
+							os.waitpid(child, 0)
+						else:
+							os.waitpid(child,os.WNOHANG)
+							if(len(self.jobsList) == 0):
+								self.jobCount = 1
+							else:
+								self.jobCount = (self.jobsList[-1].job_number) + 1
+
+							child_job = job(child, self.jobCount, line)
+							self.jobsList.append(child_job)
+							print( "[%s]	%s " % (self.jobCount,child))
+							self.jobCount += 1
+
+				except OSError:
+					print('Caught an OSError.')
 
 	def word_list(self, line):
 		"""Break the line into shell words."""
@@ -156,7 +174,6 @@ class PShell():
 			#get the job status
 			pid = job.pid
 			ps = subprocess.Popen(['ps','-p', str(pid), '-o','state='], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-
 			result,error = ps.communicate()
 			if result.decode() != '':
 				print('[{}] <{}> {}'.format(job.job_number, result.decode()[0],job.command))
